@@ -156,15 +156,27 @@ class GeneralizedTicTacToe:
                 print(f"AI plays: {move}")
                 self.make_move(move[0], move[1], ai_symbol)
     
-    def ai_vs_online(self, teamId1, teamId2, ai_symbol=PLAYER_O, depth=3):
-
+    def ai_vs_online(self, team_id_1, team_id_2, ai_symbol=PLAYER_O, depth=3):
+        import time
         ai = MinimaxAgent(ai_symbol, max_depth=depth)
-        human = PLAYER_X if ai_symbol == PLAYER_O else PLAYER_O
+        opponent = PLAYER_X if ai_symbol == PLAYER_O else PLAYER_O
 
-        gameId = api.create_game(teamId1, teamId2, self.n, self.m)
+        game_id = api.create_game(team_id_1, team_id_2, self.n, self.m)
+        print(f"Game ID: {game_id}")
 
         print(f"\nOnline Game {self.n}x{self.n}, target={self.m}")
-        print(f"AI is {ai_symbol}, Opponent is {human}\n")
+        print(f"AI is {ai_symbol}, Opponent is {opponent}\n")
+
+        # AI makes the first move
+        first_move = ai.choose_move(self)
+        if first_move is None:
+            print("AI could not find first move.")
+            return
+
+        print(f"AI plays: {first_move}")
+        self.make_move(first_move[0], first_move[1], ai_symbol)
+        last_move_id = api.make_move(game_id, team_id_1, f"{first_move[0]},{first_move[1]}")
+        print(f"My move ID: {last_move_id}")
 
         while True:
             self.print_board()
@@ -177,22 +189,57 @@ class GeneralizedTicTacToe:
                     print(f"Winner: {winner}")
                 break
 
-            if self.current_player == human:
-                res = api.get_moves(gameId, "1")
-                r, c = map(int, res["move"].split(","))
+            # Wait for opponent move
+            print("Waiting for opponent move...")
+            while True:
+                res = api.get_moves(game_id, "1")
 
-                if not self.make_move(r, c, human):
-                    print("Invalid opponent move from API")
-                    break
-            else:
-                move = ai.choose_move(self)
-                if move is None:
-                    print("No valid move found.")
-                    break
+                if res is None:
+                    time.sleep(1)
+                    continue
 
-                print(f"AI plays: {move}")
-                self.make_move(move[0], move[1], ai_symbol)
-                api.make_move(gameId, teamId1, f"{move[0]},{move[1]}")
+                # # Ignore our own last move
+                # if str(res["moveId"]) == str(last_move_id):
+                #     time.sleep(1)
+                #     continue
+                if res is None:
+                    continue
+                if res["teamId"] == team_id_1:
+                    continue  # skip my own move
+
+                try:
+                    r, c = map(int, res["move"].split(","))
+                except Exception:
+                    print("Could not parse opponent move:", res)
+                    time.sleep(1)
+                    continue
+
+                print(f"Opponent played: {(r, c)}")
+
+                if not self.make_move(r, c, opponent):
+                    print("Received invalid opponent move from API.")
+                    return
+
+                break
+
+            terminal, winner = self.is_terminal()
+            if terminal:
+                self.print_board()
+                if winner == "DRAW":
+                    print("Draw!")
+                else:
+                    print(f"Winner: {winner}")
+                break
+
+            move = ai.choose_move(self)
+            if move is None:
+                print("No valid move found for AI.")
+                break
+
+            print(f"AI plays: {move}")
+            self.make_move(move[0], move[1], ai_symbol)
+            last_move_id = api.make_move(game_id, team_id_1, f"{move[0]},{move[1]}")
+            print(f"My move ID: {last_move_id}")
 
 class MinimaxAgent:
     def __init__(self, player_symbol, max_depth=3):
