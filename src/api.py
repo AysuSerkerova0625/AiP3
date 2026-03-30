@@ -1,7 +1,11 @@
 import http.client
+import time
+import json
 import ast
 
+HOST = "www.notexponential.com"
 URL = "/aip2pgaming/api/index.php"
+
 USER_ID = "3732"
 API_KEY = "cf69bbdf6985a8666c55"
 
@@ -9,61 +13,88 @@ headers = {
     "userId": USER_ID,
     "x-api-key": API_KEY,
     "Content-Type": "application/x-www-form-urlencoded",
+    "Cookie": "humans_21909=1",
 }
 
 
+# ---------------------------------
+# CORE REQUEST FUNCTION (FIXED)
+# ---------------------------------
+def _request(method: str, path: str, body=None, retries=3) -> dict:
+    for attempt in range(retries):
+        raw_data = ""
+
+        try:
+            conn = http.client.HTTPSConnection(HOST)
+            conn.request(method, path, body, headers)
+
+            response = conn.getresponse()
+            raw_data = response.read().decode()
+            conn.close()
+
+            # 🔥 bypass cookie script
+            if raw_data.startswith("<script>"):
+                print("Cookie check triggered, retrying...")
+                time.sleep(1)
+                continue
+
+            # ✅ try JSON first
+            try:
+                return json.loads(raw_data)
+            except Exception:
+                pass
+
+            # ✅ fallback (sometimes API returns python-like dict)
+            try:
+                return ast.literal_eval(raw_data)
+            except Exception:
+                print("RAW RESPONSE:", repr(raw_data))
+                return {"code": "FAIL", "raw": raw_data}
+
+        except Exception as e:
+            print(f"Request error (attempt {attempt+1}):", e)
+            if raw_data:
+                print("RAW RESPONSE:", repr(raw_data))
+            time.sleep(1)
+
+    return {"code": "FAIL", "message": "Request failed after retries"}
+
+
+# ---------------------------------
+# WRAPPERS
+# ---------------------------------
 def make_post_request(parameters: str) -> dict:
-    conn = http.client.HTTPSConnection("www.notexponential.com")
-    conn.request("POST", URL, parameters, headers)
-    response = conn.getresponse()
-    data = response.read().decode()
-    conn.close()
-    return ast.literal_eval(data)
+    return _request("POST", URL, parameters)
 
 
 def make_get_request(parameters: str) -> dict:
-    conn = http.client.HTTPSConnection("www.notexponential.com")
-    full_path = URL + "?" + parameters
-    conn.request("GET", full_path, None, headers)
-    response = conn.getresponse()
-    data = response.read().decode()
-    conn.close()
-    return ast.literal_eval(data)
+    return _request("GET", URL + "?" + parameters)
 
 
+# ---------------------------------
+# API FUNCTIONS
+# ---------------------------------
 def create_team(tname: str) -> str:
-    payload = f"type=team&name={tname}"
-    res = make_post_request(payload)
+    res = make_post_request(f"type=team&name={tname}")
     print("create_team:", res)
     if res.get("code") != "OK":
-        raise ValueError(f"create_team failed: {res}")
+        raise ValueError(res)
     return str(res["teamId"])
 
 
 def add_team_member(teamId: str, userId: str) -> dict:
-    payload = f"type=member&userId={userId}&teamId={teamId}"
-    res = make_post_request(payload)
+    res = make_post_request(f"type=member&userId={userId}&teamId={teamId}")
     print("add_team_member:", res)
     if res.get("code") != "OK":
-        raise ValueError(f"add_team_member failed: {res}")
-    return res
-
-
-def get_team_members(teamId: str) -> dict:
-    payload = f"type=team&teamId={teamId}"
-    res = make_get_request(payload)
-    print("get_team_members:", res)
-    if res.get("code") != "OK":
-        raise ValueError(f"get_team_members failed: {res}")
+        raise ValueError(res)
     return res
 
 
 def get_my_team() -> dict:
-    payload = "type=myTeams"
-    res = make_get_request(payload)
+    res = make_get_request("type=myTeams")
     print("get_my_team:", res)
     if res.get("code") != "OK":
-        raise ValueError(f"get_my_team failed: {res}")
+        raise ValueError(res)
     return res
 
 
@@ -75,16 +106,15 @@ def create_game(teamId1: str, teamId2: str, boardSize: int, target: int) -> str:
     res = make_post_request(payload)
     print("create_game:", res)
     if res.get("code") != "OK":
-        raise ValueError(f"create_game failed: {res}")
+        raise ValueError(res)
     return str(res["gameId"])
 
 
 def get_my_games() -> dict:
-    payload = "type=myGames"
-    res = make_get_request(payload)
+    res = make_get_request("type=myGames")
     print("get_my_games:", res)
     if res.get("code") != "OK":
-        raise ValueError(f"get_my_games failed: {res}")
+        raise ValueError(res)
     return res
 
 
@@ -92,47 +122,52 @@ def make_move(gameId: str, teamId: str, move: str) -> str:
     payload = f"type=move&gameId={gameId}&teamId={teamId}&move={move}"
     res = make_post_request(payload)
     print("make_move:", res)
+
     if res.get("code") != "OK":
-        raise ValueError(f"make_move failed: {res}")
+        print("❌ MOVE FAILED:", res)
+        raise ValueError(res)
+
     return str(res["moveId"])
 
 
-def get_moves(gameId: str, count: str = "1"):
-    payload = f"type=moves&gameId={gameId}&count={count}"
-    res = make_get_request(payload)
+# 🔥 IMPORTANT FIX: RETURN FULL MOVE LIST
+def get_moves(gameId: str, count: str = "100"):
+    res = make_get_request(f"type=moves&gameId={gameId}&count={count}")
     print("get_moves:", res)
 
     if res.get("code") != "OK":
-        raise ValueError(f"get_moves failed: {res}")
+        raise ValueError(res)
 
-    if "moves" not in res or not res["moves"]:
-        return None
-
-    return res["moves"][0]
+    return res.get("moves", [])
 
 
 def get_game_details(gameId: str) -> dict:
-    payload = f"type=gameDetails&gameId={gameId}"
-    res = make_get_request(payload)
+    res = make_get_request(f"type=gameDetails&gameId={gameId}")
     print("get_game_details:", res)
+
     if res.get("code") != "OK":
-        raise ValueError(f"get_game_details failed: {res}")
+        raise ValueError(res)
+
+    # 🔥 FIX: parse inner JSON string
+    try:
+        res["game"] = json.loads(res["game"])
+    except Exception:
+        pass
+
     return res
 
 
 def get_board_string(gameId: str) -> dict:
-    payload = f"type=boardString&gameId={gameId}"
-    res = make_get_request(payload)
+    res = make_get_request(f"type=boardString&gameId={gameId}")
     print("get_board_string:", res)
     if res.get("code") != "OK":
-        raise ValueError(f"get_board_string failed: {res}")
+        raise ValueError(res)
     return res
 
 
 def get_board_map(gameId: str) -> dict:
-    payload = f"type=boardMap&gameId={gameId}"
-    res = make_get_request(payload)
+    res = make_get_request(f"type=boardMap&gameId={gameId}")
     print("get_board_map:", res)
     if res.get("code") != "OK":
-        raise ValueError(f"get_board_map failed: {res}")
+        raise ValueError(res)
     return res
