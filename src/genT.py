@@ -158,134 +158,135 @@ class GeneralizedTicTacToe:
     
     def ai_vs_online(self, team_id_1, team_id_2, game_id, depth=2):
         import time
-        import json
         import api
 
-        processed_move_ids = set()
+        ai_symbol = None
+        opponent = None
+        ai = None
 
-        # Figure out symbols from the latest move if possible
-        moves = api.get_moves(game_id, "100")
-
-
-        latest = None
-        if moves:
-            latest = moves[-1]
-        if latest is not None:
-            latest_team = str(latest["teamId"])
-            latest_symbol = latest["symbol"]
-
-            if latest_team == str(team_id_1):
-                ai_symbol = latest_symbol
-                opponent = PLAYER_O if ai_symbol == PLAYER_X else PLAYER_X
-            elif latest_team == str(team_id_2):
-                opponent = latest_symbol
-                ai_symbol = PLAYER_O if opponent == PLAYER_X else PLAYER_X
-            else:
-                ai_symbol = PLAYER_X
-                opponent = PLAYER_O
-        else:
-            # fallback
-            ai_symbol = PLAYER_X
-            opponent = PLAYER_O
-
-        ai = MinimaxAgent(ai_symbol, max_depth=depth)
-
-        print(f"\nConnected to game {game_id}")
-        print(f"AI is {ai_symbol}, Opponent is {opponent}\n")
+        print(f"\nConnected to game {game_id}\n")
 
         while True:
+            # -------------------------
+            # 1. GET GAME DETAILS
+            # -------------------------
             details = api.get_game_details(game_id)
-            game_data = details["game"]
-
-
-            if isinstance(game_data, str):
-                import json
-                game_info = json.loads(game_data)
-            else:
-                game_info = game_data
+            game_info = details["game"]
 
             status = game_info.get("status")
-            winner_team_id = game_info.get("winnerteamid")
             turn_team_id = str(game_info.get("turnteamid"))
+            winner_team_id = game_info.get("winnerteamid")
 
+            # -------------------------
+            # 2. STOP IF GAME FINISHED (SERVER SIDE)
+            # -------------------------
             if status != "O":
                 self.print_board()
+                print("\nGame finished!")
+
                 if winner_team_id is None:
-                    print("Game finished: Draw")
+                    print("Result: DRAW")
                 elif str(winner_team_id) == str(team_id_1):
-                    print("Game finished: Your team won")
+                    print("You WIN 🎉")
                 else:
-                    print("Game finished: Opponent won")
+                    print("You LOSE ❌")
+
                 break
 
+            # -------------------------
+            # 3. SYNC FULL BOARD FROM SERVER
+            # -------------------------
             moves = api.get_moves(game_id, "100")
 
-
-            # rebuild board from scratch
             self.board = [[EMPTY for _ in range(self.n)] for _ in range(self.n)]
-            self.current_player = PLAYER_X
 
             for mv in moves:
-                move_id = str(mv["moveId"])
-                processed_move_ids.add(move_id)
-
                 r, c = map(int, mv["move"].split(","))
                 symbol = mv["symbol"]
 
                 if 0 <= r < self.n and 0 <= c < self.n:
                     self.board[r][c] = symbol
 
-            # ADD THIS HERE
+            # -------------------------
+            # 4. STOP IF GAME FINISHED (LOCAL CHECK)
+            # -------------------------
             terminal, winner = self.is_terminal()
             if terminal:
                 self.print_board()
+                print("\nGame finished!")
+
                 if winner == "DRAW":
-                    print("Game finished: Draw")
+                    print("Result: DRAW")
                 else:
-                    print(f"Game finished: Winner is {winner}")
+                    print(f"Winner: {winner}")
+
                 break
-            # set current player based on turn
-            if turn_team_id == str(team_id_1):
-                self.current_player = ai_symbol
-            else:
-                self.current_player = opponent
+
+            # -------------------------
+            # 5. DETERMINE SYMBOLS ONCE
+            # -------------------------
+            if ai_symbol is None:
+                if moves:
+                    last_move = moves[-1]
+                    last_team = str(last_move["teamId"])
+                    last_symbol = last_move["symbol"]
+
+                    if last_team == str(team_id_1):
+                        ai_symbol = last_symbol
+                        opponent = PLAYER_O if ai_symbol == PLAYER_X else PLAYER_X
+                    else:
+                        opponent = last_symbol
+                        ai_symbol = PLAYER_O if opponent == PLAYER_X else PLAYER_X
+                else:
+                    # no moves yet: team1 starts as X, team2 as O
+                    if str(team_id_1) == str(game_info["team1id"]):
+                        ai_symbol = PLAYER_X
+                        opponent = PLAYER_O
+                    else:
+                        ai_symbol = PLAYER_O
+                        opponent = PLAYER_X
+
+                ai = MinimaxAgent(ai_symbol, max_depth=depth)
+                print(f"AI is {ai_symbol}, Opponent is {opponent}\n")
 
             self.print_board()
 
+            # -------------------------
+            # 6. WAIT IF NOT YOUR TURN
+            # -------------------------
             if turn_team_id != str(team_id_1):
-                print("Waiting for opponent move...")
-                time.sleep(1)
+                print("Waiting for opponent move...\n")
+                time.sleep(2)
                 continue
 
+            # -------------------------
+            # 7. YOUR TURN -> AI PLAYS
+            # -------------------------
             move = ai.choose_move(self)
+
             if move is None:
                 print("No valid move available.")
                 break
 
-            # final local safety check
             if self.board[move[0]][move[1]] != EMPTY:
-                print("Chosen move is already occupied locally:", move)
-                time.sleep(1)
+                print("Invalid move (already occupied):", move)
+                time.sleep(2)
                 continue
 
             print("AI plays:", move)
 
             try:
-                new_move_id = api.make_move(
-                    game_id, team_id_1, f"{move[0]},{move[1]}")
+                api.make_move(game_id, team_id_1, f"{move[0]},{move[1]}")
             except Exception as e:
                 print("Move failed:", e)
-                time.sleep(1)
+                time.sleep(2)
                 continue
 
-            # only update local board after server accepts
+            # update local board only after successful API submission
             self.make_move(move[0], move[1], ai_symbol)
-            processed_move_ids.add(str(new_move_id))
 
-            time.sleep(1)
-    
-
-
+            # small delay to avoid excessive polling
+            time.sleep(2)
 class MinimaxAgent:
     def __init__(self, player_symbol, max_depth=3):
         self.player = player_symbol

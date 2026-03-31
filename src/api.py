@@ -16,6 +16,7 @@ headers = {
     "Cookie": "humans_21909=1",
 }
 
+DEBUG = False
 
 # ---------------------------------
 # CORE REQUEST FUNCTION (FIXED)
@@ -32,34 +33,43 @@ def _request(method: str, path: str, body=None, retries=3) -> dict:
             raw_data = response.read().decode()
             conn.close()
 
-            # 🔥 bypass cookie script
-            if raw_data.startswith("<script>"):
-                print("Cookie check triggered, retrying...")
-                time.sleep(1)
+            # empty response -> retry
+            if raw_data == "":
+                if DEBUG:
+                    print("Empty response, retrying...")
+                time.sleep(2)
                 continue
 
-            # ✅ try JSON first
+            # cookie check page -> retry
+            if raw_data.startswith("<script>"):
+
+                if DEBUG:
+                    print("Cookie check triggered, retrying...")
+                time.sleep(2)
+                continue
+
+            # first try JSON
             try:
                 return json.loads(raw_data)
             except Exception:
                 pass
 
-            # ✅ fallback (sometimes API returns python-like dict)
+            # fallback for python-like dict responses
             try:
                 return ast.literal_eval(raw_data)
             except Exception:
-                print("RAW RESPONSE:", repr(raw_data))
+                if DEBUG:
+                    print("RAW RESPONSE:", repr(raw_data))
                 return {"code": "FAIL", "raw": raw_data}
 
         except Exception as e:
-            print(f"Request error (attempt {attempt+1}):", e)
-            if raw_data:
+            if DEBUG:
+                print(f"Request error (attempt {attempt+1}):", e)
+            if DEBUG and raw_data:
                 print("RAW RESPONSE:", repr(raw_data))
-            time.sleep(1)
+            time.sleep(2)
 
     return {"code": "FAIL", "message": "Request failed after retries"}
-
-
 # ---------------------------------
 # WRAPPERS
 # ---------------------------------
@@ -76,7 +86,8 @@ def make_get_request(parameters: str) -> dict:
 # ---------------------------------
 def create_team(tname: str) -> str:
     res = make_post_request(f"type=team&name={tname}")
-    print("create_team:", res)
+    if DEBUG:
+        print("create_team:", res)
     if res.get("code") != "OK":
         raise ValueError(res)
     return str(res["teamId"])
@@ -84,7 +95,8 @@ def create_team(tname: str) -> str:
 
 def add_team_member(teamId: str, userId: str) -> dict:
     res = make_post_request(f"type=member&userId={userId}&teamId={teamId}")
-    print("add_team_member:", res)
+    if DEBUG:
+        print("add_team_member:", res)
     if res.get("code") != "OK":
         raise ValueError(res)
     return res
@@ -92,7 +104,8 @@ def add_team_member(teamId: str, userId: str) -> dict:
 
 def get_my_team() -> dict:
     res = make_get_request("type=myTeams")
-    print("get_my_team:", res)
+    if DEBUG:
+        print("get_my_team:", res)
     if res.get("code") != "OK":
         raise ValueError(res)
     return res
@@ -104,7 +117,8 @@ def create_game(teamId1: str, teamId2: str, boardSize: int, target: int) -> str:
         f"&gameType=TTT&boardSize={boardSize}&target={target}"
     )
     res = make_post_request(payload)
-    print("create_game:", res)
+    if DEBUG:
+        print("create_game:", res)
     if res.get("code") != "OK":
         raise ValueError(res)
     return str(res["gameId"])
@@ -112,7 +126,10 @@ def create_game(teamId1: str, teamId2: str, boardSize: int, target: int) -> str:
 
 def get_my_games() -> dict:
     res = make_get_request("type=myGames")
-    print("get_my_games:", res)
+
+
+    if DEBUG:
+        print("get_my_games:", res)
     if res.get("code") != "OK":
         raise ValueError(res)
     return res
@@ -121,7 +138,8 @@ def get_my_games() -> dict:
 def make_move(gameId: str, teamId: str, move: str) -> str:
     payload = f"type=move&gameId={gameId}&teamId={teamId}&move={move}"
     res = make_post_request(payload)
-    print("make_move:", res)
+    if DEBUG:
+        print("make_move:", res)
 
     if res.get("code") != "OK":
         print("❌ MOVE FAILED:", res)
@@ -130,10 +148,14 @@ def make_move(gameId: str, teamId: str, move: str) -> str:
     return str(res["moveId"])
 
 
-# 🔥 IMPORTANT FIX: RETURN FULL MOVE LIST
+
 def get_moves(gameId: str, count: str = "100"):
     res = make_get_request(f"type=moves&gameId={gameId}&count={count}")
-    print("get_moves:", res)
+    if DEBUG:
+        print("get_moves:", res)
+
+    if res.get("code") == "FAIL" and res.get("message") == "No moves":
+        return []
 
     if res.get("code") != "OK":
         raise ValueError(res)
@@ -143,7 +165,8 @@ def get_moves(gameId: str, count: str = "100"):
 
 def get_game_details(gameId: str) -> dict:
     res = make_get_request(f"type=gameDetails&gameId={gameId}")
-    print("get_game_details:", res)
+    if DEBUG:
+        print("get_game_details:", res)
 
     if res.get("code") != "OK":
         raise ValueError(res)
@@ -159,7 +182,8 @@ def get_game_details(gameId: str) -> dict:
 
 def get_board_string(gameId: str) -> dict:
     res = make_get_request(f"type=boardString&gameId={gameId}")
-    print("get_board_string:", res)
+    if DEBUG:
+        print("get_board_string:", res)
     if res.get("code") != "OK":
         raise ValueError(res)
     return res
@@ -167,7 +191,8 @@ def get_board_string(gameId: str) -> dict:
 
 def get_board_map(gameId: str) -> dict:
     res = make_get_request(f"type=boardMap&gameId={gameId}")
-    print("get_board_map:", res)
+    if DEBUG:
+        print("get_board_map:", res)
     if res.get("code") != "OK":
         raise ValueError(res)
     return res
