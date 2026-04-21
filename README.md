@@ -22,6 +22,8 @@ git clone https://github.com/AysuSerkerova0625/AiP3
 cd src
 python3 -m venv venv
 source venv/bin/activate
+python3 main.py
+
 ```
 ### 1. Run the program
 ```

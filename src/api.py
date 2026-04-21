@@ -1,3 +1,4 @@
+import traceback
 import http.client
 import time
 import json
@@ -157,18 +158,25 @@ def make_get_request(params: Dict[str, Any]) -> Dict[str, Any]:
 
 def _ensure_ok(res: Dict[str, Any], context: str) -> Dict[str, Any]:
     if res.get("code") != "OK":
-        raise ApiError(f"{context} failed: {res}")
+        print(f"[ERROR] {context} failed:", res)
+        return {"code": "FAIL", "data": None}
     return res
-
 
 # -------------------------
 # API FUNCTIONS
 # -------------------------
 
-def create_team(tname: str) -> str:
-    res = make_post_request({"type": "team", "name": tname})
-    _ensure_ok(res, "create_team")
-    return str(res["teamId"])
+
+def create_team(tname: str) -> Optional[str]:
+    try:
+        res = make_post_request({"type": "team", "name": tname})
+        checked = _ensure_ok(res, "create_team")
+        if checked.get("code") != "OK":
+            return None
+        return str(res["teamId"])
+    except Exception as e:
+        print("create_team error:", e)
+        return None
 
 
 def add_team_member(team_id: str, user_id: str) -> Dict[str, Any]:
@@ -181,8 +189,12 @@ def add_team_member(team_id: str, user_id: str) -> Dict[str, Any]:
 
 
 def get_my_team() -> Dict[str, Any]:
-    res = make_get_request({"type": "myTeams"})
-    return _ensure_ok(res, "get_my_team")
+    try:
+        res = make_get_request({"type": "myTeams"})
+        return _ensure_ok(res, "get_my_team")
+    except Exception as e:
+        print("get_my_team error:", e)
+        return {}
 
 
 def create_game(team_id1: str, team_id2: str, board_size: int, target: int) -> str:
@@ -215,16 +227,22 @@ def normalize_move(move: Union[str, Tuple[int, int], List[int]]) -> str:
     raise ValueError(f"Unsupported move format: {move}")
 
 
-def make_move(game_id: str, team_id: str, move: Union[str, Tuple[int, int], List[int]]) -> str:
-    move_str = normalize_move(move)
-    res = make_post_request({
-        "type": "move",
-        "gameId": game_id,
-        "teamId": team_id,
-        "move": move_str,
-    })
-    _ensure_ok(res, "make_move")
-    return str(res["moveId"])
+def make_move(game_id: str, team_id: str, move: Union[str, Tuple[int, int], List[int]]) -> Optional[str]:
+    try:
+        move_str = normalize_move(move)
+        res = make_post_request({
+            "type": "move",
+            "gameId": game_id,
+            "teamId": team_id,
+            "move": move_str,
+        })
+        checked = _ensure_ok(res, "make_move")
+        if checked.get("code") != "OK":
+            return None
+        return str(res["moveId"])
+    except Exception as e:
+        print("make_move error:", e)
+        return None
 
 
 def get_moves(game_id: str, count: int = 300) -> List[Dict[str, Any]]:
@@ -258,16 +276,21 @@ def get_game_details(game_id: str) -> Dict[str, Any]:
 
 
 def get_all_moves(game_id: str) -> List[Dict[str, Any]]:
-    details = get_game_details(game_id)
-    game = details.get("game", {})
+    try:
+        details = get_game_details(game_id)
+        game = details.get("game", {})
 
-    total_moves = int(
-        game.get("moves")
-        or game.get("Moves")
-        or 0
-    )
+        total_moves = int(
+            game.get("moves")
+            or game.get("Moves")
+            or 0
+        )
 
-    return get_moves(game_id, count=max(total_moves + 5, 50))
+        return get_moves(game_id, count=max(total_moves + 5, 50))
+
+    except Exception as e:
+        print("get_all_moves error:", e)
+        return []
 
 
 # -------------------------
@@ -412,15 +435,20 @@ def play_game_light(game_id: str, my_team_id: str, show_board: bool = False) -> 
     seen_move_ids = set()
     failed_moves_for_current_state = set()
 
+
     initial_moves = get_all_moves(game_id)
     for move_obj in reversed(initial_moves):
-        move_id = get_move_id(move_obj)
-        move_str = get_move_string(move_obj)
-        move_team = get_move_team_id(move_obj)
+        try:
+            move_id = get_move_id(move_obj)
+            move_str = get_move_string(move_obj)
+            move_team = get_move_team_id(move_obj)
 
-        symbol = my_symbol if move_team == str(my_team_id) else opp_symbol
-        apply_move_to_board(board, move_str, symbol)
-        seen_move_ids.add(move_id)
+            symbol = my_symbol if move_team == str(my_team_id) else opp_symbol
+            apply_move_to_board(board, move_str, symbol)
+            seen_move_ids.add(move_id)
+        except Exception as e:
+            print("Initial board load error:", e)
+            continue
 
     print(f"Game {game_id} started. Board size: {board_size}x{board_size}")
     print(f"My team: {my_team_id}, My symbol: {my_symbol}")
@@ -450,16 +478,20 @@ def play_game_light(game_id: str, my_team_id: str, show_board: bool = False) -> 
                 failed_moves_for_current_state.clear()
 
                 for move_obj in new_moves:
-                    move_str = get_move_string(move_obj)
-                    move_team = get_move_team_id(move_obj)
+                    try:
+                        move_str = get_move_string(move_obj)
+                        move_team = get_move_team_id(move_obj)
 
-                    if move_team == str(my_team_id):
-                        apply_move_to_board(board, move_str, my_symbol)
-                        print(f"AI played: {move_str}")
-                    else:
-                        apply_move_to_board(board, move_str, opp_symbol)
-                        print(f"Opponent played: {move_str}")
+                        if move_team == str(my_team_id):
+                            apply_move_to_board(board, move_str, my_symbol)
+                            print(f"AI played: {move_str}")
+                        else:
+                            apply_move_to_board(board, move_str, opp_symbol)
+                            print(f"Opponent played: {move_str}")
 
+                    except Exception as e:
+                        print("Board update error:", e)
+                        continue
                 if show_board:
                     print_board(board)
 
@@ -494,13 +526,23 @@ def play_game_light(game_id: str, my_team_id: str, show_board: bool = False) -> 
                         continue
 
                     print(f"AI wants to play: {move_str}")
-                    move_id = make_move(game_id, my_team_id, move_str)
+                    try:
+                        move_id = make_move(game_id, my_team_id, move_str)
 
-                    apply_move_to_board(board, move_str, my_symbol)
-                    seen_move_ids.add(str(move_id))
-                    failed_moves_for_current_state.clear()
+                        if not move_id:
+                            raise Exception("Empty move_id")
 
-                    print(f"AI played: {move_str}")
+                        apply_move_to_board(board, move_str, my_symbol)
+                        seen_move_ids.add(str(move_id))
+                        failed_moves_for_current_state.clear()
+
+                        print(f"AI played: {move_str}")
+
+                    except Exception as e:
+                        print(f"Move failed safely: {move_str} -> {e}")
+                        failed_moves_for_current_state.add(move_str)
+                        time.sleep(2)
+                        continue
                     if show_board:
                         print_board(board)
 
@@ -523,6 +565,7 @@ def play_game_light(game_id: str, my_team_id: str, show_board: bool = False) -> 
 
         except Exception as e:
             print("Loop error:", e)
+            traceback.print_exc()
             time.sleep(ERROR_SLEEP_SECONDS)
 
 
@@ -539,3 +582,4 @@ if __name__ == "__main__":
 
     except Exception as e:
         print("ERROR:", e)
+        traceback.print_exc()
